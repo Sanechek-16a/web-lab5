@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <title>Neon Beat — Музична JS міні-гра</title>
+    <style>
+        body {
+            background-color: #090910;
+            color: #ffffff;
+            font-family: 'Segoe UI', sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            user-select: none;
+        }
+        h2 {
+            margin: 0 0 10px 0;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            background: linear-gradient(90deg, #00f2fe, #ff2a85);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        #hud {
+            display: flex;
+            justify-content: space-between;
+            width: 360px;
+            font-size: 18px;
+            font-weight: bold;
+            margin-bottom: 10px;
+            background: #141422;
+            padding: 10px 15px;
+            border-radius: 10px;
+            box-sizing: border-box;
+            border: 1px solid #25253d;
+        }
+        canvas {
+            background-color: #11111d;
+            border: 2px solid #2e2e4d;
+            border-radius: 12px;
+            box-shadow: 0 0 30px rgba(0, 242, 254, 0.15);
+        }
+        .controls {
+            margin-top: 15px;
+            display: flex;
+            gap: 10px;
+        }
+        button {
+            padding: 10px 22px;
+            font-size: 15px;
+            font-weight: bold;
+            background: linear-gradient(135deg, #ff2a85, #7928ca);
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: transform 0.1s;
+        }
+        button:hover {
+            transform: scale(1.05);
+        }
+        .hint {
+            margin-top: 10px;
+            font-size: 13px;
+            color: #8888aa;
+        }
+    </style>
+</head>
+<body>
+
+    <h2>🎹 Neon Beat</h2>
+
+    <div id="hud">
+        <span>Очки: <span id="score">0</span></span>
+        <span>Комбо: <span id="combo" style="color: #00f2fe;">0x</span></span>
+    </div>
+
+    <canvas id="gameCanvas" width="360" height="480"></canvas>
+
+    <div class="controls">
+        <button id="startBtn">▶ Старт / Рестарт</button>
+    </div>
+    <div class="hint">Тисни клавіші <b>D</b>, <b>F</b>, <b>J</b>, <b>K</b> (або клікай по доріжках), коли нота в зоні!</div>
+
+    <script>
+        const canvas = document.getElementById("gameCanvas");
+        const ctx = canvas.getContext("2d");
+        const scoreEl = document.getElementById("score");
+        const comboEl = document.getElementById("combo");
+
+        // Ініціалізація Web Audio API для синтезу звуку без зовнішніх файлів
+        let audioCtx = null;
+
+        // Налаштування 4 доріжок (клавіша, колір, частота ноти в Гц)
+        const lanes = [
+            { key: "KeyD", label: "D", color: "#00f2fe", freq: 261.63, flash: 0 }, // До (C4)
+            { key: "KeyF", label: "F", color: "#2ed573", freq: 329.63, flash: 0 }, // Мі (E4)
+            { key: "KeyJ", label: "J", color: "#ffa502", freq: 392.00, flash: 0 }, // Соль (G4)
+            { key: "KeyK", label: "K", color: "#ff2a85", freq: 523.25, flash: 0 }  // До2 (C5)
+        ];
+
+        const laneWidth = canvas.width / lanes.length;
+        const hitZoneY = canvas.height - 65;
+
+        let notes = [];
+        let particles = [];
+        let score = 0;
+        let combo = 0;
+        let isRunning = false;
+        let spawnTimer = 0;
+        let noteSpeed = 4;
+
+        // Функція генерації електронного звуку (синтезатор)
+        function playSynthNote(freq, isMiss = false) {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+
+            osc.type = isMiss ? "sawtooth" : "triangle";
+            osc.frequency.setValueAtTime(isMiss ? 110 : freq, audioCtx.currentTime);
+
+            gain.gain.setValueAtTime(0.25, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + (isMiss ? 0.2 : 0.35));
+
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+
+            osc.start();
+            osc.stop(audioCtx.currentTime + (isMiss ? 0.2 : 0.35));
+        }
+
+        // Створення візуальних іскор при влучанні
+        function createParticles(x, y, color) {
+            for (let i = 0; i < 12; i++) {
+                particles.push({
+                    x: x,
+                    y: y,
+                    dx: (Math.random() - 0.5) * 6,
+                    dy: (Math.random() - 0.5) * 6,
+                    life: 1.0,
+                    color: color
+                });
+            }
+        }
+
+        // Перевірка натискання доріжки
+        function triggerLane(laneIndex) {
+            if (!isRunning) return;
+            const lane = lanes[laneIndex];
+            lane.flash = 1.0; // Підсвічуємо доріжку
+
+            // Шукаємо найближчу ноту на цій доріжці в межах зони влучання
+            let hitIndex = -1;
+            for (let i = 0; i < notes.length; i++) {
+                if (notes[i].lane === laneIndex && Math.abs(notes[i].y - hitZoneY) < 42) {
+                    hitIndex = i;
+                    break;
+                }
+            }
+
+            if (hitIndex !== -1) {
+                // Влучив у ритм!
+                notes.splice(hitIndex, 1);
+                combo++;
+                score += 10 * Math.max(1, Math.floor(combo / 5) + 1);
+                scoreEl.textContent = score;
+                comboEl.textContent = combo + "x";
+
+                playSynthNote(lane.freq, false);
+                createParticles(laneIndex * laneWidth + laneWidth / 2, hitZoneY, lane.color);
+            } else {
+                // Натиснув повз ноту
+                combo = 0;
+                comboEl.textContent = "0x";
+                playSynthNote(0, true);
+            }
+        }
+
+        // Обробка клавіатури
+        window.addEventListener("keydown", (e) => {
+            const index = lanes.findIndex(l => l.key === e.code);
+            if (index !== -1 && !e.repeat) {
+                triggerLane(index);
+            }
+        });
+
+        // Обробка кліку мишею по канвасу
+        canvas.addEventListener("mousedown", (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const clickX = e.clientX - rect.left;
+            const index = Math.floor(clickX / laneWidth);
+            if (index >= 0 && index < lanes.length) {
+                triggerLane(index);
+            }
+        });
+
+        // Головний ігровий цикл
+        function gameLoop() {
+            if (!isRunning) return;
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Малюємо доріжки та підсвітку натискань
+            lanes.forEach((lane, i) => {
+                const x = i * laneWidth;
+
+                if (lane.flash > 0) {
+                    ctx.fillStyle = lane.color + Math.floor(lane.flash * 40).toString(16).padStart(2, "0");
+                    ctx.fillRect(x, 0, laneWidth, canvas.height);
+                    lane.flash -= 0.08;
+                }
+
+                // Вертикальні розділювачі
+                ctx.strokeStyle = "#1f1f35";
+                ctx.beginPath();
+                ctx.moveTo(x, 0);
+                ctx.lineTo(x, canvas.height);
+                ctx.stroke();
+
+                // Кнопки-індикатори внизу (зона влучання)
+                ctx.strokeStyle = lane.color;
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.roundRect(x + 12, hitZoneY - 18, laneWidth - 24, 36, 8);
+                ctx.stroke();
+
+                ctx.fillStyle = lane.color;
+                ctx.font = "bold 16px Segoe UI";
+                ctx.textAlign = "center";
+                ctx.fillText(lane.label, x + laneWidth / 2, hitZoneY + 6);
+            });
+
+            // Генерація нових нот
+            spawnTimer++;
+            if (spawnTimer >= 28) {
+                spawnTimer = 0;
+                const randomLane = Math.floor(Math.random() * lanes.length);
+                notes.push({ lane: randomLane, y: -20 });
+                noteSpeed = Math.min(8.5, 4 + score / 400); // Плавне прискорення темпу
+            }
+
+            // Рух та малювання нот
+            for (let i = notes.length - 1; i >= 0; i--) {
+                const note = notes[i];
+                note.y += noteSpeed;
+
+                const lane = lanes[note.lane];
+                const x = note.lane * laneWidth + 14;
+
+                ctx.fillStyle = lane.color;
+                ctx.shadowBlur = 12;
+                ctx.shadowColor = lane.color;
+                ctx.beginPath();
+                ctx.roundRect(x, note.y - 14, laneWidth - 28, 28, 8);
+                ctx.fill();
+                ctx.shadowBlur = 0;
+
+                // Пропуск ноти (полетіла за межі екрана)
+                if (note.y > canvas.height + 20) {
+                    notes.splice(i, 1);
+                    combo = 0;
+                    comboEl.textContent = "0x";
+                }
+            }
+
+            // Анімація частинок (іскор)
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const p = particles[i];
+                p.x += p.dx;
+                p.y += p.dy;
+                p.life -= 0.04;
+
+                if (p.life <= 0) {
+                    particles.splice(i, 1);
+                } else {
+                    ctx.globalAlpha = p.life;
+                    ctx.fillStyle = p.color;
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.globalAlpha = 1.0;
+                }
+            }
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        document.getElementById("startBtn").addEventListener("click", () => {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            notes = [];
+            particles = [];
+            score = 0;
+            combo = 0;
+            noteSpeed = 4;
+            scoreEl.textContent = "0";
+            comboEl.textContent = "0x";
+
+            if (!isRunning) {
+                isRunning = true;
+                gameLoop();
+            }
+        });
+    </script>
+</body>
+</html>

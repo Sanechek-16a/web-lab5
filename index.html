@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Лабораторна робота №5 — JS Анімація</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #121212;
+            color: #ffffff;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+        }
+        h2 {
+            margin-bottom: 10px;
+        }
+        #stage {
+            width: 600px;
+            height: 300px;
+            background-color: #1e1e2e;
+            border: 2px solid #00d2ff;
+            border-radius: 12px;
+            position: relative;
+            overflow: hidden;
+            box-shadow: 0 0 20px rgba(0, 210, 255, 0.2);
+        }
+        #box {
+            width: 50px;
+            height: 50px;
+            background-color: #00d2ff;
+            border-radius: 10px;
+            position: absolute;
+            top: 125px;
+            left: 10px;
+            transition: background-color 0.3s ease, border-radius 0.3s ease;
+        }
+        .controls {
+            margin-top: 20px;
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        button {
+            padding: 10px 18px;
+            font-size: 15px;
+            font-weight: bold;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            background-color: #2b2b40;
+            color: #ffffff;
+            transition: transform 0.1s, background-color 0.2s;
+        }
+        button:hover {
+            background-color: #00d2ff;
+            color: #121212;
+        }
+        button:active {
+            transform: scale(0.95);
+        }
+    </style>
+</head>
+<body>
+
+    <h2>Керування JS-анімацією</h2>
+
+    <div id="stage">
+        <div id="box"></div>
+    </div>
+
+    <div class="controls">
+        <button id="btnStart">▶ Старт</button>
+        <button id="btnPause">⏸ Пауза</button>
+        <button id="btnColor">🎨 Змінити колір</button>
+        <button id="btnShape">🔄 Форма / Пульсація</button>
+        <button id="btnReset">🔁 Скинути</button>
+    </div>
+
+    <script>
+        // Отримання посилань на HTML-елементи за їх ID
+        const stage = document.getElementById("stage");
+        const box = document.getElementById("box");
+
+        // Об'єкт стану анімації
+        const state = {
+            posX: 10,
+            posY: 125,
+            speedX: 3,
+            speedY: 2,
+            isRunning: false,
+            isCircle: false,
+            animationId: null
+        };
+
+        // Масив доступних кольорів
+        const colors = ["#00d2ff", "#ff4757", "#2ed573", "#ffa502", "#a55eea"];
+        let colorIndex = 0;
+
+        // Основна функція покадрової анімації
+        function animate() {
+            if (!state.isRunning) return;
+
+            // Оновлюємо координати
+            state.posX += state.speedX;
+            state.posY += state.speedY;
+
+            // Перевірка зіткнення зі стінками контейнера (відбивання)
+            const maxX = stage.clientWidth - box.offsetWidth;
+            const maxY = stage.clientHeight - box.offsetHeight;
+
+            if (state.posX >= maxX || state.posX <= 0) {
+                state.speedX = -state.speedX;
+            }
+            if (state.posY >= maxY || state.posY <= 0) {
+                state.speedY = -state.speedY;
+            }
+
+            // Застосовуємо нові координати до CSS-стилів елемента
+            box.style.left = state.posX + "px";
+            box.style.top = state.posY + "px";
+
+            // Запитуємо наступний кадр анімації
+            state.animationId = requestAnimationFrame(animate);
+        }
+
+        // Обробники подій для кнопок
+        document.getElementById("btnStart").addEventListener("click", () => {
+            if (!state.isRunning) {
+                state.isRunning = true;
+                animate();
+            }
+        });
+
+        document.getElementById("btnPause").addEventListener("click", () => {
+            state.isRunning = false;
+            cancelAnimationFrame(state.animationId);
+        });
+
+        document.getElementById("btnColor").addEventListener("click", () => {
+            colorIndex = (colorIndex + 1) % colors.length;
+            box.style.backgroundColor = colors[colorIndex];
+        });
+
+        document.getElementById("btnShape").addEventListener("click", () => {
+            state.isCircle = !state.isCircle;
+            box.style.borderRadius = state.isCircle ? "50%" : "10px";
+            box.style.transform = state.isCircle ? "scale(1.25)" : "scale(1)";
+        });
+
+        document.getElementById("btnReset").addEventListener("click", () => {
+            state.isRunning = false;
+            cancelAnimationFrame(state.animationId);
+            state.posX = 10;
+            state.posY = 125;
+            state.isCircle = false;
+            box.style.left = state.posX + "px";
+            box.style.top = state.posY + "px";
+            box.style.borderRadius = "10px";
+            box.style.transform = "scale(1)";
+            box.style.backgroundColor = colors[0];
+        });
+    </script>
+</body>
+</html>
